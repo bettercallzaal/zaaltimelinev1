@@ -1,0 +1,89 @@
+{
+  "name": "chronobuilder",
+  "version": "0.1.0",
+  "description": "Open-source digital identity timeline for builders, creators, and communities",
+  "private": true,
+  "author": "ChronoBuilder Team",
+  "license": "MIT",
+  "homepage": "https://chronobuilder.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/chronobuilder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/chronobuilder/issues"
+  },
+  "keywords": [
+    "timeline",
+    "portfolio",
+    "digital-identity",
+    "blockchain",
+    "ai-search",
+    "verification",
+    "open-source"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "type-check": "turbo run type-check",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,mdx,css,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,mdx,css,yaml,yml}\"",
+    "clean": "turbo run clean && rimraf node_modules .turbo",
+    "clean:deps": "rimraf 'packages/*/node_modules' 'apps/*/node_modules' 'tools/*/node_modules' node_modules",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "pnpm build && changeset publish",
+    "release": "pnpm changeset:version && pnpm changeset:publish",
+    "prepare": "husky install",
+    "db:generate": "pnpm --filter @chronobuilder/api db:generate",
+    "db:push": "pnpm --filter @chronobuilder/api db:push",
+    "db:migrate": "pnpm --filter @chronobuilder/api db:migrate",
+    "db:studio": "pnpm --filter @chronobuilder/api db:studio",
+    "storybook": "pnpm --filter @chronobuilder/ui storybook",
+    "storybook:build": "pnpm --filter @chronobuilder/ui storybook:build"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "@types/node": "^20.10.5",
+    "eslint": "^8.56.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "only-allow": "^1.2.1",
+    "prettier": "^3.1.1",
+    "rimraf": "^5.0.5",
+    "turbo": "^1.11.2",
+    "typescript": "^5.3.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,mdx,css,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "^18.2.45",
+      "@types/react-dom": "^18.2.18"
+    }
+  }
+}
