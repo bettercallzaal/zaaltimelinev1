@@ -26,8 +26,7 @@
   },
   "scripts": {
     "dev": "cd apps/web && pnpm dev",
-    "build": "cd apps/web && pnpm build",
-    "start": "cd apps/web && pnpm start",
-    "install-deps": "pnpm install && cd apps/web && pnpm install"
+    "build": "pnpm install && cd apps/web && pnpm install && cd apps/web && pnpm build",
+    "start": "cd apps/web && pnpm start"
   }
 }
