@@ -19,21 +19,15 @@ export default function Home() {
 
   const fetchEntries = async () => {
     try {
-      console.log('Fetching entries from API...')
       const response = await fetch('/api/entries')
-      console.log('API response status:', response.status)
       
       if (response.ok) {
         const data = await response.json()
-        console.log('API data received:', data.length, 'entries')
         setEntries(data)
       } else {
-        const errorText = await response.text()
-        console.error('API failed with status:', response.status, 'Error:', errorText)
         // Fallback to localStorage if API fails
         const savedEntries = localStorage.getItem('timeline-entries')
         if (savedEntries) {
-          console.log('Using localStorage fallback')
           setEntries(JSON.parse(savedEntries))
         }
       }
@@ -42,7 +36,6 @@ export default function Home() {
       // Fallback to localStorage
       const savedEntries = localStorage.getItem('timeline-entries')
       if (savedEntries) {
-        console.log('Using localStorage fallback after error')
         setEntries(JSON.parse(savedEntries))
       }
     } finally {

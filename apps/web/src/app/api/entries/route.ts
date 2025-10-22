@@ -12,6 +12,14 @@ export async function GET() {
       }, { status: 500 })
     }
 
+    // Try to ensure database schema exists
+    try {
+      await prisma.$queryRaw`SELECT 1 FROM timeline_entries LIMIT 1`
+    } catch (tableError) {
+      // Table might not exist yet, return empty array
+      return NextResponse.json([])
+    }
+
     const entries = await prisma.timelineEntry.findMany({
       orderBy: {
         date: 'desc'

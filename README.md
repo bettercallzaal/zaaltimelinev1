@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-000000?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fbettercallzaal%2Fzaaltimelinev1&project-name=chronobuilder&repository-name=chronobuilder)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/bettercallzaal/zaaltimelinev1&project-name=chronobuilder&repository-name=chronobuilder)
 
 ## 🎯 What is ChronoBuilder?
 
@@ -30,7 +30,7 @@ A simple, beautiful photo timeline that helps you organize your digital memories
 ## 🚀 Quick Deploy (5 minutes)
 
 ### Option 1: One-Click Deploy
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fbettercallzaal%2Fzaaltimelinev1&project-name=chronobuilder&repository-name=chronobuilder)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/bettercallzaal/zaaltimelinev1&project-name=chronobuilder&repository-name=chronobuilder)
 
 1. Click the deploy button above
 2. Connect your GitHub account
