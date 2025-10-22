@@ -4,6 +4,14 @@ import { prisma } from '@/lib/db'
 // GET all entries
 export async function GET() {
   try {
+    // Check if DATABASE_URL is configured
+    if (!process.env.DATABASE_URL) {
+      console.error('DATABASE_URL environment variable is not set')
+      return NextResponse.json({ 
+        error: 'Database not configured. Please set DATABASE_URL environment variable.' 
+      }, { status: 500 })
+    }
+
     const entries = await prisma.timelineEntry.findMany({
       orderBy: {
         date: 'desc'
@@ -12,7 +20,10 @@ export async function GET() {
     return NextResponse.json(entries)
   } catch (error) {
     console.error('Error fetching entries:', error)
-    return NextResponse.json({ error: 'Failed to fetch entries' }, { status: 500 })
+    return NextResponse.json({ 
+      error: 'Failed to fetch entries. Check database connection.',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
   }
 }
 
