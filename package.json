@@ -22,11 +22,11 @@
     "open-source"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.17.0"
   },
   "scripts": {
     "dev": "cd apps/web && pnpm dev",
-    "build": "pnpm install && cd apps/web && pnpm install && cd apps/web && pnpm build",
+    "build": "cd apps/web && pnpm install && pnpm build",
     "start": "cd apps/web && pnpm start"
   }
 }
