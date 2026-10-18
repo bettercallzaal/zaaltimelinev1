@@ -5,12 +5,14 @@ import { Plus } from 'lucide-react'
 import Timeline from '@/components/Timeline'
 import AddEntryModal from '@/components/AddEntryModal'
 import { TimelineEntry } from '@/lib/types'
+import { WRITE_KEY_HEADER } from '@/lib/write-key-header'
 
 export default function Home() {
   const [entries, setEntries] = useState<TimelineEntry[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
 
   // Load entries from API on mount
   useEffect(() => {
@@ -57,83 +59,80 @@ export default function Home() {
     )
   }
 
-  const addEntry = async (newEntry: Omit<TimelineEntry, 'id' | 'createdAt'>) => {
+  // The admin key lives in this browser only. Adding and deleting send it; the
+  // server refuses without it (lib/write-key.ts).
+  const readKey = () => {
+    try {
+      return localStorage.getItem('timeline-admin-key') ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  const saveKey = (key: string) => {
+    try {
+      if (key) localStorage.setItem('timeline-admin-key', key)
+      else localStorage.removeItem('timeline-admin-key')
+    } catch {
+      // Private mode: the key is used for this request only.
+    }
+  }
+
+  const refusal = async (response: Response) => {
+    if (response.status === 401) saveKey('')
+    const body = await response.json().catch(() => ({}))
+    return typeof body.error === 'string' ? body.error : `Request failed (${response.status})`
+  }
+
+  // A refused or failed save is shown as an error. It is never stored in this
+  // browser and shown as saved, which is what the page did before.
+  const addEntry = async (newEntry: Omit<TimelineEntry, 'id' | 'createdAt'>, key: string) => {
     setIsLoading(true)
+    setError('')
     try {
       const response = await fetch('/api/entries', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', [WRITE_KEY_HEADER]: key },
         body: JSON.stringify(newEntry),
       })
-
-      if (response.ok) {
-        const entry = await response.json()
-        setEntries(prev => [entry, ...prev].sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ))
-      } else {
-        // Fallback to localStorage
-        const entry: TimelineEntry = {
-          ...newEntry,
-          id: Date.now().toString(),
-          createdAt: new Date(),
-        }
-        setEntries(prev => {
-          const updated = [entry, ...prev].sort((a, b) => 
-            new Date(b.date).getTime() - new Date(a.date).getTime()
-          )
-          localStorage.setItem('timeline-entries', JSON.stringify(updated))
-          return updated
-        })
+      if (!response.ok) {
+        setError(await refusal(response))
+        return
       }
+      saveKey(key)
+      const entry = await response.json()
+      setEntries(prev => [entry, ...prev].sort((a, b) =>
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      ))
       setIsModalOpen(false)
-    } catch (error) {
-      console.error('Error adding entry:', error)
-      // Fallback to localStorage
-      const entry: TimelineEntry = {
-        ...newEntry,
-        id: Date.now().toString(),
-        createdAt: new Date(),
-      }
-      setEntries(prev => {
-        const updated = [entry, ...prev].sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        )
-        localStorage.setItem('timeline-entries', JSON.stringify(updated))
-        return updated
-      })
-      setIsModalOpen(false)
+    } catch (err) {
+      console.error('Error adding entry:', err)
+      setError('Could not reach the server. Nothing was saved.')
     } finally {
       setIsLoading(false)
     }
   }
 
   const deleteEntry = async (id: string) => {
+    setError('')
+    const key = readKey()
+    if (!key) {
+      setError('Deleting needs the admin key. Enter it in the Add Photo form once and it is remembered here.')
+      return
+    }
     try {
       const response = await fetch(`/api/entries/${id}`, {
         method: 'DELETE',
+        headers: { [WRITE_KEY_HEADER]: key },
       })
-
-      if (response.ok) {
-        setEntries(prev => prev.filter(entry => entry.id !== id))
-      } else {
-        // Fallback to localStorage
-        setEntries(prev => {
-          const updated = prev.filter(entry => entry.id !== id)
-          localStorage.setItem('timeline-entries', JSON.stringify(updated))
-          return updated
-        })
+      if (!response.ok) {
+        setError(await refusal(response))
+        return
       }
-    } catch (error) {
-      console.error('Error deleting entry:', error)
-      // Fallback to localStorage
-      setEntries(prev => {
-        const updated = prev.filter(entry => entry.id !== id)
-        localStorage.setItem('timeline-entries', JSON.stringify(updated))
-        return updated
-      })
+      setEntries(prev => prev.filter(entry => entry.id !== id))
+    } catch (err) {
+      console.error('Error deleting entry:', err)
+      setError('Could not reach the server. Nothing was deleted.')
     }
   }
 
@@ -155,6 +154,12 @@ export default function Home() {
           Add Photo
         </button>
       </div>
+
+      {error && (
+        <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* Timeline */}
       {entries.length > 0 ? (
@@ -184,6 +189,7 @@ export default function Home() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onAdd={addEntry}
+        isSaving={isLoading}
       />
     </main>
   )

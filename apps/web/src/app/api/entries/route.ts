@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { validateNewEntry } from '@/lib/validate'
+import { refuseWithoutKey } from '@/lib/write-key'
 
 // GET all entries
 export async function GET() {
@@ -8,8 +10,7 @@ export async function GET() {
     if (!process.env.DATABASE_URL) {
       console.error('DATABASE_URL environment variable is not set')
       return NextResponse.json({ 
-        error: 'Database not configured. Please set DATABASE_URL environment variable.',
-        debug: 'DATABASE_URL is missing'
+        error: 'Database not configured. Please set DATABASE_URL environment variable.'
       }, { status: 500 })
     }
 
@@ -22,8 +23,7 @@ export async function GET() {
     } catch (connectionError) {
       console.error('Database connection failed:', connectionError)
       return NextResponse.json({ 
-        error: 'Database connection failed',
-        debug: connectionError instanceof Error ? connectionError.message : 'Unknown connection error'
+        error: 'Database connection failed'
       }, { status: 500 })
     }
 
@@ -50,8 +50,7 @@ export async function GET() {
       } catch (createError) {
         console.error('Failed to create table:', createError)
         return NextResponse.json({ 
-          error: 'Database table creation failed',
-          debug: createError instanceof Error ? createError.message : 'Unknown table creation error'
+          error: 'Database table creation failed'
         }, { status: 500 })
       }
     }
@@ -67,64 +66,37 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching entries:', error)
     return NextResponse.json({ 
-      error: 'Failed to fetch entries. Check database connection.',
-      debug: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Failed to fetch entries. Check database connection.'
     }, { status: 500 })
   }
 }
 
-// POST new entry
+// POST new entry. Needs the admin key (lib/write-key.ts); input is checked
+// before the database is touched (lib/validate.ts).
 export async function POST(request: NextRequest) {
+  const refused = refuseWithoutKey(request)
+  if (refused) return refused
+
+  let body: unknown
   try {
-    // Check if DATABASE_URL is configured
-    if (!process.env.DATABASE_URL) {
-      console.error('DATABASE_URL environment variable is not set')
-      return NextResponse.json({ 
-        error: 'Database not configured. Please set DATABASE_URL environment variable.',
-        debug: 'DATABASE_URL is missing'
-      }, { status: 500 })
-    }
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Send a JSON object.' }, { status: 400 })
+  }
+  const checked = validateNewEntry(body)
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 })
 
-    const body = await request.json()
-    const { photo, description, date, link } = body
+  if (!process.env.DATABASE_URL) {
+    console.error('DATABASE_URL environment variable is not set')
+    return NextResponse.json({ error: 'Database not configured.' }, { status: 500 })
+  }
 
-    console.log('Creating new entry:', { description, date, hasPhoto: !!photo, hasLink: !!link })
-
-    if (!photo || !description || !date) {
-      return NextResponse.json({ 
-        error: 'Missing required fields',
-        debug: { hasPhoto: !!photo, hasDescription: !!description, hasDate: !!date }
-      }, { status: 400 })
-    }
-
-    // Try to connect to database
-    try {
-      await prisma.$connect()
-      console.log('Database connection successful for POST')
-    } catch (connectionError) {
-      console.error('Database connection failed:', connectionError)
-      return NextResponse.json({ 
-        error: 'Database connection failed',
-        debug: connectionError instanceof Error ? connectionError.message : 'Unknown connection error'
-      }, { status: 500 })
-    }
-
-    const entry = await prisma.timelineEntry.create({
-      data: {
-        photo,
-        description,
-        date: new Date(date),
-        link: link || null
-      }
-    })
-
-    console.log('Entry created successfully:', entry.id)
+  try {
+    const entry = await prisma.timelineEntry.create({ data: checked.entry })
+    console.log('Entry created:', entry.id)
     return NextResponse.json(entry, { status: 201 })
   } catch (error) {
     console.error('Error creating entry:', error)
-    return NextResponse.json({ 
-      error: 'Failed to create entry',
-      debug: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to create entry' }, { status: 500 })
   }
 }

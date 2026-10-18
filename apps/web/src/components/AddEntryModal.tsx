@@ -1,22 +1,41 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { X, Upload, Calendar, FileText, Link } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { X, Upload, Calendar, FileText, Link, KeyRound } from 'lucide-react'
 import { TimelineEntry } from '@/lib/types'
 
 interface AddEntryModalProps {
   isOpen: boolean
   onClose: () => void
-  onAdd: (entry: Omit<TimelineEntry, 'id' | 'createdAt'>) => void
+  onAdd: (entry: Omit<TimelineEntry, 'id' | 'createdAt'>, adminKey: string) => void
+  isSaving?: boolean
 }
 
-export default function AddEntryModal({ isOpen, onClose, onAdd }: AddEntryModalProps) {
+export default function AddEntryModal({ isOpen, onClose, onAdd, isSaving = false }: AddEntryModalProps) {
   const [photo, setPhoto] = useState<string>('')
   const [description, setDescription] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [link, setLink] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [adminKey, setAdminKey] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Opening: fill the key this browser remembers. Closing (cancel, or the page
+  // closing it after a save): clear the form. A refused save keeps it open and filled.
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        setAdminKey(localStorage.getItem('timeline-admin-key') ?? '')
+      } catch {
+        setAdminKey('')
+      }
+    } else {
+      setPhoto('')
+      setDescription('')
+      setDate(new Date().toISOString().split('T')[0])
+      setLink('')
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -51,18 +70,16 @@ export default function AddEntryModal({ isOpen, onClose, onAdd }: AddEntryModalP
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (photo && description.trim()) {
-      onAdd({
-        photo,
-        description: description.trim(),
-        date: new Date(date),
-        link: link.trim() || undefined,
-      })
-      // Reset form
-      setPhoto('')
-      setDescription('')
-      setDate(new Date().toISOString().split('T')[0])
-      setLink('')
+    if (photo && description.trim() && adminKey.trim()) {
+      onAdd(
+        {
+          photo,
+          description: description.trim(),
+          date: new Date(date),
+          link: link.trim() || undefined,
+        },
+        adminKey.trim(),
+      )
     }
   }
 
@@ -188,6 +205,26 @@ export default function AddEntryModal({ isOpen, onClose, onAdd }: AddEntryModalP
             </p>
           </div>
 
+          {/* Admin key */}
+          <div>
+            <label htmlFor="admin-key" className="block text-sm font-medium text-gray-700 mb-2">
+              <KeyRound size={16} className="inline mr-1" />
+              Admin key
+            </label>
+            <input
+              id="admin-key"
+              type="password"
+              autoComplete="current-password"
+              value={adminKey}
+              onChange={(e) => setAdminKey(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Only the site owner can add or delete. Remembered in this browser after a successful save.
+            </p>
+          </div>
+
           {/* Buttons */}
           <div className="flex gap-3 pt-4">
             <button
@@ -199,10 +236,10 @@ export default function AddEntryModal({ isOpen, onClose, onAdd }: AddEntryModalP
             </button>
             <button
               type="submit"
-              disabled={!photo || !description.trim()}
+              disabled={!photo || !description.trim() || !adminKey.trim() || isSaving}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
-              Add Entry
+              {isSaving ? 'Saving...' : 'Add Entry'}
             </button>
           </div>
         </form>
