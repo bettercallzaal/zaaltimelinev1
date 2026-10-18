@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Trash2, Calendar, ExternalLink } from 'lucide-react'
 import { TimelineEntry } from '@/lib/types'
+import { safeLink } from '@/lib/validate'
 
 interface TimelineEntryCardProps {
   entry: TimelineEntry
@@ -19,6 +20,9 @@ export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCard
       year: 'numeric'
     })
   }
+
+  // Rows saved before input checks existed may hold any string; only http(s) renders.
+  const link = safeLink(entry.link)
 
   const handleDelete = () => {
     if (showDeleteConfirm) {
@@ -66,9 +70,9 @@ export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCard
             {formatDate(entry.date)}
           </div>
           
-          {entry.link && (
+          {link && (
             <a
-              href={entry.link}
+              href={link}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-full text-sm font-medium transition-colors"
