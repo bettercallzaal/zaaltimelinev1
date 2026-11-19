@@ -7,9 +7,11 @@ import { calendarDateKey, formatCalendarDate } from '@/lib/calendar-date'
 interface TimelineProps {
   entries: TimelineEntry[]
   onDelete: (id: string) => void
+  /** Ids of entries saved only in this browser, not in the database. */
+  localIds?: Set<string>
 }
 
-export default function Timeline({ entries, onDelete }: TimelineProps) {
+export default function Timeline({ entries, onDelete, localIds }: TimelineProps) {
   // Group entries by month/year for better organization
   const groupedEntries = entries.reduce((groups, entry) => {
     const dateKey = calendarDateKey(entry.date)
@@ -51,6 +53,7 @@ export default function Timeline({ entries, onDelete }: TimelineProps) {
                   <TimelineEntryCard 
                     entry={entry} 
                     onDelete={() => onDelete(entry.id)}
+                    isLocalOnly={localIds?.has(entry.id) ?? false}
                   />
                 </div>
               </div>

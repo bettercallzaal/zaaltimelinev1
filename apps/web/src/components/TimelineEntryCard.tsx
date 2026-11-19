@@ -9,9 +9,11 @@ import { formatCalendarDate } from '@/lib/calendar-date'
 interface TimelineEntryCardProps {
   entry: TimelineEntry
   onDelete: () => void
+  /** Saved only in this browser: deleting removes it here, not from the database. */
+  isLocalOnly?: boolean
 }
 
-export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCardProps) {
+export default function TimelineEntryCard({ entry, onDelete, isLocalOnly = false }: TimelineEntryCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   // Rows saved before input checks existed may hold any string; only http(s) renders.
@@ -45,10 +47,18 @@ export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCard
               ? 'bg-red-500 text-white' 
               : 'bg-black bg-opacity-50 text-white hover:bg-opacity-70'
           }`}
-          title={showDeleteConfirm ? 'Click again to confirm delete' : 'Delete entry'}
+          title={showDeleteConfirm
+            ? 'Click again to confirm delete'
+            : isLocalOnly ? 'Remove from this browser' : 'Delete entry'}
         >
           <Trash2 size={16} />
         </button>
+
+        {isLocalOnly && (
+          <span className="absolute top-3 left-3 rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">
+            Only on this browser
+          </span>
+        )}
       </div>
 
       {/* Content */}
