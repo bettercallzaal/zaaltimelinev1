@@ -6,6 +6,63 @@ import Timeline from '@/components/Timeline'
 import AddEntryModal from '@/components/AddEntryModal'
 import { TimelineEntry } from '@/lib/types'
 import { WRITE_KEY_HEADER } from '@/lib/write-key-header'
+import { calendarDateKey } from '@/lib/calendar-date'
+import { safeLink } from '@/lib/validate'
+
+const LOCAL_ENTRIES_KEY = 'timeline-entries'
+const ADMIN_KEY_STORAGE = 'timeline-admin-key'
+
+function readLocalEntries(raw: string | null): TimelineEntry[] {
+  if (!raw) return []
+  try {
+    const value: unknown = JSON.parse(raw)
+    if (!Array.isArray(value)) return []
+    return value.filter((entry): entry is TimelineEntry =>
+      !!entry && typeof entry === 'object' &&
+      typeof entry.id === 'string' && typeof entry.photo === 'string' &&
+      typeof entry.description === 'string' && typeof entry.date === 'string' &&
+      !!calendarDateKey(entry.date),
+    )
+  } catch {
+    return []
+  }
+}
+
+// Compare entries the way the server stores them (validate.ts trims the
+// description and normalizes the link), so a saved copy of a row that is
+// already in the database is not counted or restored twice. An invalid link
+// is kept raw so it never matches a row that has no link.
+function entryIdentity(entry: TimelineEntry): string {
+  const rawLink = entry.link ?? ''
+  return JSON.stringify([
+    entry.photo,
+    entry.description.trim(),
+    calendarDateKey(entry.date),
+    rawLink ? safeLink(rawLink) ?? rawLink : '',
+  ])
+}
+
+/** Local entries with no matching server row (matched one-for-one). */
+function unmatchedEntries(serverEntries: TimelineEntry[], localEntries: TimelineEntry[]): TimelineEntry[] {
+  const available = new Map<string, number>()
+  for (const entry of serverEntries) {
+    const identity = entryIdentity(entry)
+    available.set(identity, (available.get(identity) ?? 0) + 1)
+  }
+  const unmatched: TimelineEntry[] = []
+  for (const localEntry of localEntries) {
+    const identity = entryIdentity(localEntry)
+    const count = available.get(identity) ?? 0
+    if (count > 0) available.set(identity, count - 1)
+    else unmatched.push(localEntry)
+  }
+  return unmatched
+}
+
+function mergeEntries(serverEntries: TimelineEntry[], localEntries: TimelineEntry[]): TimelineEntry[] {
+  return [...serverEntries, ...unmatchedEntries(serverEntries, localEntries)]
+    .sort((a, b) => calendarDateKey(b.date).localeCompare(calendarDateKey(a.date)))
+}
 
 export default function Home() {
   const [entries, setEntries] = useState<TimelineEntry[]>([])
@@ -13,6 +70,9 @@ export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [pendingEntries, setPendingEntries] = useState<TimelineEntry[]>([])
+  const [recoveryKey, setRecoveryKey] = useState('')
+  const [isRecovering, setIsRecovering] = useState(false)
 
   // Load entries from API on mount
   useEffect(() => {
@@ -20,26 +80,28 @@ export default function Home() {
   }, [])
 
   const fetchEntries = async () => {
+    let savedEntries: TimelineEntry[] = []
+    try {
+      savedEntries = readLocalEntries(localStorage.getItem(LOCAL_ENTRIES_KEY))
+    } catch {
+      // Storage can be unavailable in private browsing; still try the API.
+    }
+    setPendingEntries(savedEntries)
     try {
       const response = await fetch('/api/entries')
       
       if (response.ok) {
         const data = await response.json()
-        setEntries(data)
+        // Older builds saved the whole list here, server rows included; only
+        // rows the database lacks still need restoring.
+        setPendingEntries(unmatchedEntries(data, savedEntries))
+        setEntries(mergeEntries(data, savedEntries))
       } else {
-        // Fallback to localStorage if API fails
-        const savedEntries = localStorage.getItem('timeline-entries')
-        if (savedEntries) {
-          setEntries(JSON.parse(savedEntries))
-        }
+        setEntries(savedEntries)
       }
     } catch (error) {
       console.error('Error fetching entries:', error)
-      // Fallback to localStorage
-      const savedEntries = localStorage.getItem('timeline-entries')
-      if (savedEntries) {
-        setEntries(JSON.parse(savedEntries))
-      }
+      setEntries(savedEntries)
     } finally {
       setIsLoaded(true)
     }
@@ -63,7 +125,7 @@ export default function Home() {
   // server refuses without it (lib/write-key.ts).
   const readKey = () => {
     try {
-      return localStorage.getItem('timeline-admin-key') ?? ''
+      return localStorage.getItem(ADMIN_KEY_STORAGE) ?? ''
     } catch {
       return ''
     }
@@ -71,8 +133,8 @@ export default function Home() {
 
   const saveKey = (key: string) => {
     try {
-      if (key) localStorage.setItem('timeline-admin-key', key)
-      else localStorage.removeItem('timeline-admin-key')
+      if (key) localStorage.setItem(ADMIN_KEY_STORAGE, key)
+      else localStorage.removeItem(ADMIN_KEY_STORAGE)
     } catch {
       // Private mode: the key is used for this request only.
     }
@@ -136,6 +198,66 @@ export default function Home() {
     }
   }
 
+  const recoverLocalEntries = async () => {
+    if (!recoveryKey.trim() || pendingEntries.length === 0 || isRecovering) return
+    setIsRecovering(true)
+    setError('')
+    try {
+      const listResponse = await fetch('/api/entries')
+      if (!listResponse.ok) {
+        setError(await refusal(listResponse))
+        return
+      }
+      const serverEntries: TimelineEntry[] = await listResponse.json()
+      const existingCounts = new Map<string, number>()
+      for (const entry of serverEntries) {
+        const identity = entryIdentity(entry)
+        existingCounts.set(identity, (existingCounts.get(identity) ?? 0) + 1)
+      }
+      const remaining: TimelineEntry[] = []
+      let firstError = ''
+
+      for (const localEntry of pendingEntries) {
+        const identity = entryIdentity(localEntry)
+        const count = existingCounts.get(identity) ?? 0
+        if (count > 0) {
+          existingCounts.set(identity, count - 1)
+          continue
+        }
+        try {
+          const response = await fetch('/api/entries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', [WRITE_KEY_HEADER]: recoveryKey.trim() },
+            body: JSON.stringify(localEntry),
+          })
+          if (response.ok) {
+            serverEntries.push(await response.json())
+          } else {
+            remaining.push(localEntry)
+            firstError ||= await refusal(response)
+          }
+        } catch {
+          remaining.push(localEntry)
+          firstError ||= 'Could not reach the server. Unrestored entries remain on this browser.'
+        }
+      }
+
+      try {
+        if (remaining.length) localStorage.setItem(LOCAL_ENTRIES_KEY, JSON.stringify(remaining))
+        else localStorage.removeItem(LOCAL_ENTRIES_KEY)
+        if (!firstError) saveKey(recoveryKey.trim())
+      } catch {
+        firstError ||= 'Entries were restored, but this browser could not update its saved copy.'
+      }
+      setPendingEntries(remaining)
+      setEntries(mergeEntries(serverEntries, remaining))
+      if (firstError) setError(firstError)
+      else setRecoveryKey('')
+    } finally {
+      setIsRecovering(false)
+    }
+  }
+
   return (
     <main className="container mx-auto px-4 py-8 max-w-4xl">
       {/* Header */}
@@ -159,6 +281,33 @@ export default function Home() {
         <div role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {pendingEntries.length > 0 && (
+        <section className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4" aria-label="Restore older offline entries">
+          <p className="font-medium text-amber-900">
+            {pendingEntries.length} older {pendingEntries.length === 1 ? 'entry is' : 'entries are'} saved on this browser.
+          </p>
+          <p className="mt-1 text-sm text-amber-800">Enter the admin key to restore them to the database. Restored copies are removed from this browser.</p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              autoComplete="current-password"
+              aria-label="Admin key for restoring entries"
+              value={recoveryKey}
+              onChange={event => setRecoveryKey(event.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-amber-300 px-3 py-2"
+            />
+            <button
+              type="button"
+              onClick={recoverLocalEntries}
+              disabled={!recoveryKey.trim() || isRecovering}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {isRecovering ? 'Restoring...' : 'Restore entries'}
+            </button>
+          </div>
+        </section>
       )}
 
       {/* Timeline */}

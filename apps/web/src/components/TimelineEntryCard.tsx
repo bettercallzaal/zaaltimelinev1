@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Trash2, Calendar, ExternalLink } from 'lucide-react'
 import { TimelineEntry } from '@/lib/types'
 import { safeLink } from '@/lib/validate'
+import { formatCalendarDate } from '@/lib/calendar-date'
 
 interface TimelineEntryCardProps {
   entry: TimelineEntry
@@ -12,14 +13,6 @@ interface TimelineEntryCardProps {
 
 export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-
-  const formatDate = (date: Date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    })
-  }
 
   // Rows saved before input checks existed may hold any string; only http(s) renders.
   const link = safeLink(entry.link)
@@ -67,7 +60,11 @@ export default function TimelineEntryCard({ entry, onDelete }: TimelineEntryCard
         <div className="flex items-center justify-between">
           <div className="flex items-center text-sm text-gray-500">
             <Calendar size={14} className="mr-1" />
-            {formatDate(entry.date)}
+            {formatCalendarDate(entry.date, {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
           </div>
           
           {link && (
