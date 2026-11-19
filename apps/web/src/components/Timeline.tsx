@@ -2,6 +2,7 @@
 
 import { TimelineEntry } from '@/lib/types'
 import TimelineEntryCard from '@/components/TimelineEntryCard'
+import { calendarDateKey, formatCalendarDate } from '@/lib/calendar-date'
 
 interface TimelineProps {
   entries: TimelineEntry[]
@@ -11,8 +12,8 @@ interface TimelineProps {
 export default function Timeline({ entries, onDelete }: TimelineProps) {
   // Group entries by month/year for better organization
   const groupedEntries = entries.reduce((groups, entry) => {
-    const date = new Date(entry.date)
-    const monthYear = date.toLocaleDateString('en-US', { 
+    const dateKey = calendarDateKey(entry.date)
+    const monthYear = formatCalendarDate(dateKey, {
       month: 'long', 
       year: 'numeric' 
     })

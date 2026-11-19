@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, Upload, Calendar, FileText, Link, KeyRound } from 'lucide-react'
 import { TimelineEntry } from '@/lib/types'
+import { todayInputValue } from '@/lib/calendar-date'
 
 interface AddEntryModalProps {
   isOpen: boolean
@@ -14,7 +15,7 @@ interface AddEntryModalProps {
 export default function AddEntryModal({ isOpen, onClose, onAdd, isSaving = false }: AddEntryModalProps) {
   const [photo, setPhoto] = useState<string>('')
   const [description, setDescription] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(todayInputValue)
   const [link, setLink] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [adminKey, setAdminKey] = useState('')
@@ -32,7 +33,7 @@ export default function AddEntryModal({ isOpen, onClose, onAdd, isSaving = false
     } else {
       setPhoto('')
       setDescription('')
-      setDate(new Date().toISOString().split('T')[0])
+      setDate(todayInputValue())
       setLink('')
     }
   }, [isOpen])
@@ -75,7 +76,9 @@ export default function AddEntryModal({ isOpen, onClose, onAdd, isSaving = false
         {
           photo,
           description: description.trim(),
-          date: new Date(date),
+          // Keep the selected calendar day at UTC midnight; display/grouping
+          // reads the stored YYYY-MM-DD independently of the viewer timezone.
+          date: new Date(`${date}T00:00:00.000Z`),
           link: link.trim() || undefined,
         },
         adminKey.trim(),
@@ -86,7 +89,7 @@ export default function AddEntryModal({ isOpen, onClose, onAdd, isSaving = false
   const handleClose = () => {
     setPhoto('')
     setDescription('')
-    setDate(new Date().toISOString().split('T')[0])
+    setDate(todayInputValue())
     setLink('')
     onClose()
   }
