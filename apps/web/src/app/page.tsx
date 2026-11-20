@@ -6,63 +6,17 @@ import Timeline from '@/components/Timeline'
 import AddEntryModal from '@/components/AddEntryModal'
 import { TimelineEntry } from '@/lib/types'
 import { WRITE_KEY_HEADER } from '@/lib/write-key-header'
-import { calendarDateKey } from '@/lib/calendar-date'
-import { safeLink } from '@/lib/validate'
+import { formatCalendarDate } from '@/lib/calendar-date'
+import {
+  LOCAL_ENTRIES_KEY,
+  byCalendarDayDesc,
+  mergeEntries,
+  pendingLocalEntries,
+  readLocalEntries,
+  restoreProblem,
+} from '@/lib/local-entries'
 
-const LOCAL_ENTRIES_KEY = 'timeline-entries'
 const ADMIN_KEY_STORAGE = 'timeline-admin-key'
-
-function readLocalEntries(raw: string | null): TimelineEntry[] {
-  if (!raw) return []
-  try {
-    const value: unknown = JSON.parse(raw)
-    if (!Array.isArray(value)) return []
-    return value.filter((entry): entry is TimelineEntry =>
-      !!entry && typeof entry === 'object' &&
-      typeof entry.id === 'string' && typeof entry.photo === 'string' &&
-      typeof entry.description === 'string' && typeof entry.date === 'string' &&
-      !!calendarDateKey(entry.date),
-    )
-  } catch {
-    return []
-  }
-}
-
-// Compare entries the way the server stores them (validate.ts trims the
-// description and normalizes the link), so a saved copy of a row that is
-// already in the database is not counted or restored twice. An invalid link
-// is kept raw so it never matches a row that has no link.
-function entryIdentity(entry: TimelineEntry): string {
-  const rawLink = entry.link ?? ''
-  return JSON.stringify([
-    entry.photo,
-    entry.description.trim(),
-    calendarDateKey(entry.date),
-    rawLink ? safeLink(rawLink) ?? rawLink : '',
-  ])
-}
-
-/** Local entries with no matching server row (matched one-for-one). */
-function unmatchedEntries(serverEntries: TimelineEntry[], localEntries: TimelineEntry[]): TimelineEntry[] {
-  const available = new Map<string, number>()
-  for (const entry of serverEntries) {
-    const identity = entryIdentity(entry)
-    available.set(identity, (available.get(identity) ?? 0) + 1)
-  }
-  const unmatched: TimelineEntry[] = []
-  for (const localEntry of localEntries) {
-    const identity = entryIdentity(localEntry)
-    const count = available.get(identity) ?? 0
-    if (count > 0) available.set(identity, count - 1)
-    else unmatched.push(localEntry)
-  }
-  return unmatched
-}
-
-function mergeEntries(serverEntries: TimelineEntry[], localEntries: TimelineEntry[]): TimelineEntry[] {
-  return [...serverEntries, ...unmatchedEntries(serverEntries, localEntries)]
-    .sort((a, b) => calendarDateKey(b.date).localeCompare(calendarDateKey(a.date)))
-}
 
 export default function Home() {
   const [entries, setEntries] = useState<TimelineEntry[]>([])
@@ -73,6 +27,7 @@ export default function Home() {
   const [pendingEntries, setPendingEntries] = useState<TimelineEntry[]>([])
   const [recoveryKey, setRecoveryKey] = useState('')
   const [isRecovering, setIsRecovering] = useState(false)
+  const [confirmDiscardId, setConfirmDiscardId] = useState('')
 
   // Load entries from API on mount
   useEffect(() => {
@@ -86,15 +41,16 @@ export default function Home() {
     } catch {
       // Storage can be unavailable in private browsing; still try the API.
     }
-    setPendingEntries(savedEntries)
+    // Until the server answers, every browser-only entry is a candidate.
+    setPendingEntries(pendingLocalEntries([], savedEntries))
     try {
       const response = await fetch('/api/entries')
       
       if (response.ok) {
         const data = await response.json()
         // Older builds saved the whole list here, server rows included; only
-        // rows the database lacks still need restoring.
-        setPendingEntries(unmatchedEntries(data, savedEntries))
+        // browser-only rows the database lacks still need restoring.
+        setPendingEntries(pendingLocalEntries(data, savedEntries))
         setEntries(mergeEntries(data, savedEntries))
       } else {
         setEntries(savedEntries)
@@ -163,9 +119,7 @@ export default function Home() {
       }
       saveKey(key)
       const entry = await response.json()
-      setEntries(prev => [entry, ...prev].sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      ))
+      setEntries(prev => [entry, ...prev].sort(byCalendarDayDesc))
       setIsModalOpen(false)
     } catch (err) {
       console.error('Error adding entry:', err)
@@ -175,7 +129,30 @@ export default function Home() {
     }
   }
 
+  // Remove one browser-only entry from this browser's saved copy. Other saved
+  // rows are left exactly as they are.
+  const removeLocalEntry = (id: string) => {
+    setError('')
+    try {
+      const saved = readLocalEntries(localStorage.getItem(LOCAL_ENTRIES_KEY))
+      const kept = saved.filter(entry => entry.id !== id)
+      if (kept.length) localStorage.setItem(LOCAL_ENTRIES_KEY, JSON.stringify(kept))
+      else localStorage.removeItem(LOCAL_ENTRIES_KEY)
+    } catch {
+      setError('This browser could not update its saved copy. Nothing was removed.')
+      return
+    }
+    setPendingEntries(prev => prev.filter(entry => entry.id !== id))
+    setEntries(prev => prev.filter(entry => entry.id !== id))
+    setConfirmDiscardId('')
+  }
+
   const deleteEntry = async (id: string) => {
+    // Browser-only entries were never in the database; the API cannot delete them.
+    if (pendingEntries.some(entry => entry.id === id)) {
+      removeLocalEntry(id)
+      return
+    }
     setError('')
     const key = readKey()
     if (!key) {
@@ -209,19 +186,15 @@ export default function Home() {
         return
       }
       const serverEntries: TimelineEntry[] = await listResponse.json()
-      const existingCounts = new Map<string, number>()
-      for (const entry of serverEntries) {
-        const identity = entryIdentity(entry)
-        existingCounts.set(identity, (existingCounts.get(identity) ?? 0) + 1)
-      }
       const remaining: TimelineEntry[] = []
       let firstError = ''
 
-      for (const localEntry of pendingEntries) {
-        const identity = entryIdentity(localEntry)
-        const count = existingCounts.get(identity) ?? 0
-        if (count > 0) {
-          existingCounts.set(identity, count - 1)
+      // Re-check against the current list: another tab or browser may have
+      // restored some of these already.
+      for (const localEntry of pendingLocalEntries(serverEntries, pendingEntries)) {
+        // The server would refuse it; keep it here for the person to discard.
+        if (restoreProblem(localEntry)) {
+          remaining.push(localEntry)
           continue
         }
         try {
@@ -258,6 +231,12 @@ export default function Home() {
     }
   }
 
+  const unrestorable = pendingEntries
+    .map(entry => ({ entry, problem: restoreProblem(entry) }))
+    .filter((item): item is { entry: TimelineEntry; problem: string } => item.problem !== null)
+  const restorable = pendingEntries.filter(entry => !restoreProblem(entry))
+  const localIds = new Set(pendingEntries.map(entry => entry.id))
+
   return (
     <main className="container mx-auto px-4 py-8 max-w-4xl">
       {/* Header */}
@@ -285,34 +264,73 @@ export default function Home() {
 
       {pendingEntries.length > 0 && (
         <section className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4" aria-label="Restore older offline entries">
-          <p className="font-medium text-amber-900">
-            {pendingEntries.length} older {pendingEntries.length === 1 ? 'entry is' : 'entries are'} saved on this browser.
-          </p>
-          <p className="mt-1 text-sm text-amber-800">Enter the admin key to restore them to the database. Restored copies are removed from this browser.</p>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <input
-              type="password"
-              autoComplete="current-password"
-              aria-label="Admin key for restoring entries"
-              value={recoveryKey}
-              onChange={event => setRecoveryKey(event.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-amber-300 px-3 py-2"
-            />
-            <button
-              type="button"
-              onClick={recoverLocalEntries}
-              disabled={!recoveryKey.trim() || isRecovering}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-            >
-              {isRecovering ? 'Restoring...' : 'Restore entries'}
-            </button>
-          </div>
+          {restorable.length > 0 && (
+            <>
+              <p className="font-medium text-amber-900">
+                {restorable.length} older {restorable.length === 1 ? 'entry is' : 'entries are'} saved only on this browser.
+              </p>
+              <p className="mt-1 text-sm text-amber-800">Enter the admin key to restore them to the database. Restored copies are removed from this browser.</p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  aria-label="Admin key for restoring entries"
+                  value={recoveryKey}
+                  onChange={event => setRecoveryKey(event.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-amber-300 px-3 py-2"
+                />
+                <button
+                  type="button"
+                  onClick={recoverLocalEntries}
+                  disabled={!recoveryKey.trim() || isRecovering}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                  {isRecovering ? 'Restoring...' : 'Restore entries'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {unrestorable.length > 0 && (
+            <div className={restorable.length > 0 ? 'mt-4 border-t border-amber-200 pt-4' : ''}>
+              <p className="font-medium text-amber-900">
+                {unrestorable.length} saved {unrestorable.length === 1 ? 'entry' : 'entries'} cannot be restored.
+              </p>
+              <p className="mt-1 text-sm text-amber-800">The server would refuse {unrestorable.length === 1 ? 'it' : 'them'}. Discarding removes the entry from this browser only.</p>
+              <ul className="mt-3 space-y-2">
+                {unrestorable.map(({ entry, problem }) => (
+                  <li key={entry.id} className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-white p-3 sm:flex-row sm:items-center">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-gray-900">
+                        {entry.description.trim() || '(no description)'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatCalendarDate(entry.date, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                      <p className="mt-1 text-sm text-red-700">{problem}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => confirmDiscardId === entry.id ? removeLocalEntry(entry.id) : setConfirmDiscardId(entry.id)}
+                      className={`rounded-lg px-3 py-1.5 text-sm ${
+                        confirmDiscardId === entry.id
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'border border-red-300 text-red-700 hover:bg-red-50'
+                      }`}
+                    >
+                      {confirmDiscardId === entry.id ? 'Click again to discard' : 'Discard'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </section>
       )}
 
       {/* Timeline */}
       {entries.length > 0 ? (
-        <Timeline entries={entries} onDelete={deleteEntry} />
+        <Timeline entries={entries} onDelete={deleteEntry} localIds={localIds} />
       ) : (
         <div className="text-center py-16">
           <div className="text-gray-400 mb-4">
